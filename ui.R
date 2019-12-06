@@ -8,7 +8,7 @@ shinyUI(navbarPage("Glazy Data Explorer",
                             
                             h2("Glazy Dataset"),
                             p("Through this Shiny app, we will explore the characteristics of Glazy data through a few different extracts of the database. ", a("Glazy", href='https://glazy.org/'), " is an open-source database of glaze recipes for ceramics. There are many chemical constituents in a given glaze which influence the color, opacity, and surface characteristics of a glaze. In addition, this chemistry affects the firing temperature range and the unique outcomes of firing within that range. "),
-                            p("The recipes in the Glazy database come primarily from American potters' collections starting in the 1970s. Many of these glazes originate much earlier and hail from other regions such as China, Korea, or Japan. As a result, this data has some duplicate or nearly duplicate recipes. Furthermore, given that the recipes are primarily submitted by American potters, they will reflect a similar style and use Western-style firing temperatures more often than others. " ),
+                            p("The recipes in the Glazy database come primarily from American potters' collections starting in the 1970s. Many of these glazes originate much earlier and hail from other regions such as China, Korea, or Japan. As a result, this data has some duplicate or nearly duplicate recipes. Furthermore, given that the recipes are primarily submitted by American potters, they will reflect a similar style and use Western-style firing temperatures more often than others. Another thing to note is that firing temperatures are typically measured by Orton pyrometric cones. Pyrometric cones measure a ", em("temperature equivalent"), ", not merely temperature. Cones bend according to the temperature in the kiln and the rate of temperature increase. Typically, firing temperature is kept between two Orton cones. In an effort to make these a bit more interpretable (cone numbers decrease from 022 to 01, then increase from 1 to 14 as temperature equivalent increases), we will convert these cone values to \\(^{\\circ}F\\) for the slow rate, i.e. \\(27^{\\circ}F/hour\\). " ),
                             
                             h3("Data Sources"),
                             tags$ul(
@@ -53,15 +53,38 @@ shinyUI(navbarPage("Glazy Data Explorer",
                                 h3("Select the visualization options:"),
                                 selectizeInput("source", "Data Source", selected = "All", 
                                                choices = c("All", "Glazes", "Composites")),
+                                helpText("Note: files are quite large. It may take up to 2-3 minutes for results to appear."),
                                 br(),
-                                selectizeInput("type", "Type of Visualization/Summary", selected="Histogram", 
-                                               choices=c('Histogram', 'Bivariate Scatter Plot', 'Summary Statistics')),
-                                selectizeInput("chemSelect", "Select Chemical", choices=c("SiO2","Al2O3","B2O3","Li2O","K2O","Na2O","KNaO","BeO","MgO","CaO","SrO","BaO","ZnO","PbO","P2O5","F","V2O5","Cr2O3","MnO","MnO2","FeO","Fe2O3","CoO","NiO","CuO","Cu2O","CdO","TiO2","ZrO","ZrO2","SnO2","HfO2","Nb2O5","Ta2O5","MoO3","WO3","OsO2","IrO2","PtO2","Ag2O","Au2O3","GeO2","As2O3","Sb2O3","Bi2O3","SeO2","La2O3","CeO2","PrO2","Pr2O3","Nd2O3","U3O8","Sm2O3","Eu2O3","Tb2O3","Dy2O3","Ho2O3","Er2O3","Tm2O3","Yb2O3", "Lu2O3"))
+                                selectizeInput("type", "Type of Visualization", selected="Histogram", 
+                                               choices=c('Histogram', 'Boxplot')),
+                                checkboxInput("isChem", "Investigate chemical variable?"),
+                                conditionalPanel('input.isChem == 1', 
+                                                 selectizeInput("chemSelect", "Select Chemical", choices=c("SiO2","Al2O3","B2O3","Li2O","K2O","Na2O","KNaO","BeO","MgO","CaO","SrO","BaO","ZnO","PbO","P2O5","F","V2O5","Cr2O3","MnO","MnO2","FeO","Fe2O3","CoO","NiO","CuO","Cu2O","CdO","TiO2","ZrO","ZrO2","SnO2","HfO2","Nb2O5","Ta2O5","MoO3","WO3","OsO2","IrO2","PtO2","Ag2O","Au2O3","GeO2","As2O3","Sb2O3","Bi2O3","SeO2","La2O3","CeO2","PrO2","Pr2O3","Nd2O3","U3O8","Sm2O3","Eu2O3","Tb2O3","Dy2O3","Ho2O3","Er2O3","Tm2O3","Yb2O3", "Lu2O3")),
+                                                 selectizeInput("chemValType", "Select Chemical Measurement Type", choices=c("Percent", "Percent Mol", "UMF")
+                                                                )
+                                ),
+                                conditionalPanel('input.isChem == 0', 
+                                                 selectizeInput("var", "Select Variable to Analyze", choices=c("from_orton_cone", "to_orton_cone", "loi", "SiO2_Al2O3_ratio_umf")
+                                                                )
+                                                 ), 
+                                conditionalPanel('input.type == "Boxplot"', 
+                                                 selectizeInput('catVar', 'Select Categorical "Slicing" Variable', choices=c('material_state', 'surface_type', 'transparency_type'))
+                                                 ), downloadButton('Download', "Download Image"), downloadButton('DownloadData', "Download Data")
                               ),
                               
                               # Show outputs
                               mainPanel(
-                                plotOutput("viz"),
+                                h2("Visualization"),
+                                plotOutput("viz",
+                                           click = "plot_click",
+                                           dblclick = "plot_dblclick",
+                                           hover = "plot_hover",
+                                           brush = "plot_brush"),
+                                conditionalPanel('input.type == "Histogram"', 
+                                                 p("When using a histogram visualization, you can select a subset of the data for csv download. To do so, select the desired region. Variable values of the selected region will be used to subset the data before download. This will allow you to investigate outlier regions which seem erroneous."),
+                                                 textOutput("info")
+                                                 ),
+                                h2("Summary Statistics"),
                                 tableOutput("table")
                               )
                             )),
