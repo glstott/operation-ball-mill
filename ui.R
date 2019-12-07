@@ -1,5 +1,6 @@
 library(ggplot2)
 library(dplyr)
+library(DT)
 
 shinyUI(navbarPage("Glazy Data Explorer",
                    tabPanel("About", 
@@ -88,7 +89,35 @@ shinyUI(navbarPage("Glazy Data Explorer",
                                 tableOutput("table")
                               )
                             )),
-                   tabPanel("Clustering"),
-                   tabPanel("Model"),
-                   tabPanel("Just the data")
+                   
+                   tabPanel("Clustering", sidebarLayout(
+                     sidebarPanel(
+                       selectizeInput("source", "Data Source", 
+                                      choices = c("All", "Glazes", "Composites")),
+                       selectizeInput('distForm', 'Select Desired Clustering Method', choices= c("average", "single", "complete", "ward")),
+                       uiOutput('xcol'),
+                       uiOutput('ycol'),
+                       helpText("Note: Plot is oversized to allow for easier reading of content. Identifiers are a concatenation of id and the first 24 characters of the name field. ")
+                       
+                     ), 
+                     mainPanel(
+                       plotOutput('biplt')
+                     )
+                   )),
+                   tabPanel("Model" ),
+                   
+                   tabPanel("Just the data", 
+                            sidebarLayout(
+                              sidebarPanel(
+                                selectizeInput("source", "Data Source", 
+                                               choices = c("All", "Glazes", "Composites")),
+                                actionLink("selectall","Select All"),
+                                uiOutput('varControl')
+                              ),
+                              mainPanel(
+                                dataTableOutput("modTable"), 
+                                downloadButton('longDownload', "Download Filtered Dataset")
+                              )
+                            )
+                            )
 ))

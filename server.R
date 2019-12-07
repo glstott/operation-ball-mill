@@ -1,6 +1,11 @@
 library(shiny)
 library(dplyr)
 library(ggplot2)
+library(DT)
+library(haven)
+library(cluster)
+library(rgl)
+library(tree)
 
 shinyServer(function(input, output, session) {
   
@@ -22,6 +27,7 @@ shinyServer(function(input, output, session) {
     
     return (newData)
   })
+  
   
   getVar<- reactive({
     if(input$isChem == 1){
@@ -131,6 +137,63 @@ shinyServer(function(input, output, session) {
     paste0(
       "Selected Region for data download: \n", xy_range_str(input$plot_brush)
     )
+  })
+  
+  
+  # choose columns to display
+  output$modTable <- renderDataTable({
+    df<- getData()
+    datatable(df[, input$show_vars, drop = FALSE], options = list(orderClasses = TRUE))
+  })
+  
+  observe({
+    df<- getData()
+    if(input$selectall == 0) return(NULL) 
+    else if (input$selectall%%2 == 0)
+    {
+      updateCheckboxGroupInput(session, "show_vars", "Columns to show:", names(df), selected = names(df))
+    }
+    else
+    {
+      updateCheckboxGroupInput(session, "show_vars", "Columns to show:",
+                               names(df))
+    }
+  })
+  
+  output$varControl<- renderUI({
+    df<- getData()
+    checkboxGroupInput("show_vars", "Columns to show:",
+                       names(df), selected = names(df))
+  })
+  
+  output$xcol<- renderUI({
+    df<- getData()
+    x<- colnames(select_if(df, is.numeric))
+    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id')]
+    selectInput('xcol', 'Select the X Variable', x)
+  })
+  
+  output$ycol<- renderUI({
+    df<- getData()
+    x<- colnames(select_if(df, is.numeric))
+    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id') & x!= input$xcol]
+    selectInput('ycol', 'Select the Y Variable', x)
+  })
+  
+  output$biplt<- renderPlot({
+    df<- getData()
+    df<- na.omit(df)
+    df<- df %>% mutate_if(is.numeric, scale)
+    rownames(df)<- paste(df$id, substr(df$name, 1, 24), sep = '-')
+    df$name<- NULL
+    hierClust <-agnes(df[, c(input$xcol, input$ycol)], method=input$distForm)
+    plot(hierClust, xlab = "", main=paste('Dendogram of', input$xcol, 'and', input$ycol))
+  }, height = 1000, width = 2400)
+  
+  output$longDownload<- downloadHandler('Glazy-filtered.csv', content = function(file) {
+    s = input$modTable_rows_all
+    df<- getData()
+    write.csv(df[s, input$show_vars, drop = FALSE], file, row.names = FALSE)
   })
   
 })
