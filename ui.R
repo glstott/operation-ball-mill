@@ -1,6 +1,11 @@
-library(ggplot2)
+library(shiny)
 library(dplyr)
+library(ggplot2)
 library(DT)
+library(haven)
+library(cluster)
+library(rgl)
+library(tree)
 
 shinyUI(navbarPage("Glazy Data Explorer",
                    tabPanel("About", 
@@ -44,8 +49,9 @@ shinyUI(navbarPage("Glazy Data Explorer",
                               tags$li('loi: Loss on Ignition')),
                             
                             h2("Glazy Data Explorer App"),
-                            p("Using the above data, this app will let you explore the data through some basic statistics and graphs, export the data as a CSV file or export graphics, perform PCA on a few noteworthy variables, and model... ")
+                            p("Using the above data, this app will let you explore the data through some basic statistics and graphs, export the data as a CSV file or export graphics, perform PCA on a few noteworthy variables, and model either transparency or surface texture using a few of the chemical and temperature data points. In the future, I will clean some of the underlying data with known issues. They are numerous, and there are many duplicate entries with only minor edits to recipes.  ")
                    ),
+                   
                    tabPanel("Data Explorer", 
                             
                             # Sidebar with options for the data set
@@ -104,7 +110,53 @@ shinyUI(navbarPage("Glazy Data Explorer",
                        plotOutput('biplt')
                      )
                    )),
-                   tabPanel("Model" ),
+                   
+
+                   tabPanel("Model", sidebarLayout(
+                     sidebarPanel(
+                       selectizeInput("source", "Data Source",
+                                      choices = c("All", "Glazes", "Composites")),
+                       selectizeInput('supModel', 'Select Supervised Learning Model', choices= c("KNN Classifier", "Random Forest Classifier")),
+                       selectizeInput("tarVar", "Select target variable", choices=c('surface_type', 'transparency_type')),
+                       selectizeInput('outputType', "Select Desired Output", choices=c("Model Stats", "Frequency Table", "New Prediction")),
+                       conditionalPanel('input.supModel == "Random Forest Classifier"',
+                                        sliderInput("treeCount", "Select number of trees for model training",
+                                                    min = 100, max = 1000, value = 100, step = 10)),
+                       conditionalPanel('input.supModel == "KNN Classifier"',
+                                        sliderInput("kVal", "Select value for K (how many neighbors should we use to estimate the point)",
+                                                    min = 1, max = 24, value = 3, step = 1)),
+                       sliderInput("ratio", "What percentage of the data should we use for training?",
+                                   min=0.5, max=0.9, value=0.7, step=0.01),
+
+                     ),
+                     mainPanel(
+                       conditionalPanel('input.outputType == "Model Stats"', 
+                                        h1("Model Stats"), 
+                                        tableOutput("stats")),
+                       
+                       conditionalPanel('input.outputType == "Frequency Table"', 
+                                        h1("Frequency Table of Actual and Predicted"), tableOutput("results")),
+                       
+                       conditionalPanel('input.outputType == "New Prediction"', 
+                                        h1("New Prediction"),
+                                       sliderInput('from_orton_cone', 'from_orton_cone', min=1080, max = 2389, step=1, value=1080), 
+                                       sliderInput('SiO2_percent', 'SiO2_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('Al2O3_percent', 'Al2O3_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('B2O3_percent', 'B2O3_percent',  min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('Li2O_percent', 'Li2O_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('K2O_percent', 'K2O_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('Na2O_percent', 'Na2O_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('KNaO_percent', 'KNaO_percent',min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('BeO_percent','BeO_percent',  min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('MgO_percent', 'MgO_percent',min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('CaO_percent', 'CaO_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('SrO_percent', 'SrO_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('BaO_percent', 'BaO_percent',min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('ZnO_percent', 'ZnO_percent', min=0, max = 100, step=1, value = 2), 
+                                       sliderInput('PbO_percent', 'PbO_percent', min=0, max = 100, step=1, value = 2),
+                                       h2(textOutput("prediction")))
+                     )
+                   )),
                    
                    tabPanel("Just the data", 
                             sidebarLayout(

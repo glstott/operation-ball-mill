@@ -5,11 +5,17 @@ library(DT)
 library(haven)
 library(cluster)
 library(rgl)
-library(tree)
+library(class)
+library(randomForest)
+library(gsubfn)
+library(mltest)
 
 shinyServer(function(input, output, session) {
   
-  #get data for only order specified
+  #---------------------------------------------------------------------------------------------------------------
+  # --------------------------- General Functions -----------------------------------------------------------------------
+  #---------------------------------------------------------------------------------------------------------------
+  # Get the data according to user input of source file
   getData <- reactive({
     src <- input$source
     
@@ -28,7 +34,11 @@ shinyServer(function(input, output, session) {
     return (newData)
   })
   
+  #---------------------------------------------------------------------------------------------------------------
+  # --------------------------- Data Explorer -----------------------------------------------------------------------
+  #---------------------------------------------------------------------------------------------------------------
   
+  # For exploratory data, get the variable selection for chemical variables (adds a more interactive ui)
   getVar<- reactive({
     if(input$isChem == 1){
       chemType<- switch(input$chemValType, "Percent"="_percent", "Percent Mol"="_percent_mol", "UMF"="_umf")
@@ -39,7 +49,9 @@ shinyServer(function(input, output, session) {
     return(var)
   })
   
+  # For exploratory data, get summary of univariate characteristics
   output$table <- renderTable({
+    # Summary Stat function thanks to a helpful question on stack overflow: https://stackoverflow.com/a/38892880
     sumstats = function(x) { 
       null.k <- function(x) sum(is.na(x))
       unique.k <- function(x) {if (sum(is.na(x)) > 0) length(unique(x)) - 1
@@ -70,16 +82,20 @@ shinyServer(function(input, output, session) {
                                                                 '95%', 'max') 
       return(sumtable)
     } 
-    #get data
+    # end of stack overflow function
+    
+    # get data and summarize
     df <- getData()
     sumstats(df[getVar()])
   })
   
+  # generate plot for histogram or boxplot on data exploration page
   pltgen<- reactive({
     #get data
     df <- getData()
     var<- getVar()
     
+    # Check user input and use to determine plot characteristics
     if (input$type == 'Histogram'){
       g <- ggplot(df, aes_string(x = var)) + geom_histogram()
     } else if (input$type == 'Boxplot'){
@@ -89,10 +105,12 @@ shinyServer(function(input, output, session) {
     g
   })
   
+  # Render visualization for eda page
   output$viz<- renderPlot({
     pltgen()
   })
   
+  # Generate image to be downloaded of the plot
   output$Download <- downloadHandler(
     filename = function(){
       paste(input$source, '-', input$type, '-', getVar(), '.png', sep = '')
@@ -102,6 +120,7 @@ shinyServer(function(input, output, session) {
     }
   )
   
+  #generate the csv file basekd upon user selection for the data explorer page
   output$DownloadData <- downloadHandler(
     filename = function() {
       paste(input$source, ".csv", sep = "")
@@ -110,7 +129,8 @@ shinyServer(function(input, output, session) {
       
       df<- getData()
       var<- getVar()
-      print(input$plot_brush)
+      
+      # Check that a selection is made. Default to the entire dataset if not. otherwise filter and output to df.
       if (!is.null(input$plot_brush) & input$type=='Histogram'){
         df<- df %>% filter(get(var) >= input$plot_brush$xmin & get(var) <= input$plot_brush$xmax )
         print(head(df))
@@ -118,12 +138,12 @@ shinyServer(function(input, output, session) {
         df
       }
       
+      # write results to the csv file
       write.csv(df, file, row.names = FALSE)
     }
   )
   
-  
-  
+  # Print the selected region of the desired variable for user so they know before download
   output$info <- renderText({
     xy_str <- function(e) {
       if(is.null(e)) return("NULL\n")
@@ -139,13 +159,120 @@ shinyServer(function(input, output, session) {
     )
   })
   
+  #---------------------------------------------------------------------------------------------------------------
+  # --------------------------- Clustering -----------------------------------------------------------------------
+  #---------------------------------------------------------------------------------------------------------------
   
-  # choose columns to display
-  output$modTable <- renderDataTable({
+  # For the clustering section, UI to select the x variable, filtering out the bad options.
+  output$xcol<- renderUI({
     df<- getData()
-    datatable(df[, input$show_vars, drop = FALSE], options = list(orderClasses = TRUE))
+    x<- colnames(select_if(df, is.numeric))
+    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id')]
+    selectInput('xcol', 'Select the X Variable', x)
   })
   
+  # For the clustering section, UI to select the y variable, filtering out the bad options and the selected X value.
+  output$ycol<- renderUI({
+    df<- getData()
+    x<- colnames(select_if(df, is.numeric))
+    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id') & x!= input$xcol]
+    selectInput('ycol', 'Select the Y Variable', x)
+  })
+  
+  # Render the dendogram for the user
+  output$biplt<- renderPlot({
+    df<- getData()
+    df<- na.omit(df)
+    df<- df %>% mutate_if(is.numeric, scale)
+    rownames(df)<- paste(df$id, substr(df$name, 1, 24), sep = '-')
+    df$name<- NULL
+    hierClust <-agnes(df[, c(input$xcol, input$ycol)], method=input$distForm)
+    plot(hierClust, xlab = "", main=paste('Dendogram of', input$xcol, 'and', input$ycol))
+  }, height = 1000, width = 2400)
+  
+  
+  #---------------------------------------------------------------------------------------------------------------
+  # --------------------------- Modeling   -----------------------------------------------------------------------
+  #---------------------------------------------------------------------------------------------------------------
+  
+  # Getmodel function to make model available elsewhere
+  getModel <- reactive({
+    #Set the seed, get and filter the data to the needed training and test sets
+    set.seed(666)
+    df<- getData()
+    target<- input$tarVar
+    df<- df %>% select(target, from_orton_cone, SiO2_percent, Al2O3_percent, B2O3_percent, Li2O_percent, K2O_percent, Na2O_percent, KNaO_percent, BeO_percent, MgO_percent, CaO_percent, SrO_percent, BaO_percent, ZnO_percent, PbO_percent) %>% replace(., is.na(.), 0) %>% filter(!is.na(get(target)))
+    trainVec<- sample(1:nrow(df), size = nrow(df)*input$ratio)
+    testVec <- setdiff(1:nrow(df), trainVec)
+    train <- df[trainVec, ]
+    test <- df[testVec, ]
+    mod<- input$supModel
+    ts<- select(test, -target)
+    
+    #Train desired model
+    if (mod == 'Random Forest Classifier') {
+      if (target == 'surface_type'){
+        rfit<- randomForest(surface_type ~ ., data=train,  mtry = ncol(train)/3, ntree=input$treeCount, importance=TRUE)
+      } else {
+        rfit<- randomForest(transparency_type ~ ., data=train,  mtry = ncol(train)/3, ntree=input$treeCount, importance=TRUE)
+      }
+      
+      testpred<-predict(rfit, newdata=ts, type="response")
+    } else if (mod == 'KNN Classifier') {
+      rfit<- NULL
+      trs<- select(train, -target)
+      cl<- train[, target]
+      testpred<- knn(train=trs, 
+                     test=ts, cl=cl, k=input$kVal)
+    }
+    
+    return (list(mod, train, test, rfit, testpred))
+  })
+  
+  #Output frequency table. Log prints the percent misclass overall.
+  output$results <- renderTable({
+    list[mod, train, test, rfit, testpred]<- getModel()
+    print(nrow(test))
+    print(length(testpred))
+    target<- input$tarVar
+    t1<- table(Prediction=testpred, Actual=test[, target])
+    print(1 - sum(diag(t1))/sum(t1))
+    t1
+  })
+  
+  #Output the stats table. Uses a function for ml predictions
+  output$stats <- renderTable({
+    list[mod, train, test, rfit, testpred]<- getModel()
+    print(nrow(test))
+    print(length(testpred))
+    target<- input$tarVar
+    t<-ml_test(testpred, test[, target], output.as.table=TRUE)
+  }, rownames = TRUE)
+  
+  #New prediction generator. Read in the sliders, then grab an instance of the model before finding the prediction
+  output$prediction <- renderText({
+    x<- c(input$from_orton_cone, input$SiO2_percent, input$Al2O3_percent, input$B2O3_percent, input$Li2O_percent, input$K2O_percent, input$Na2O_percent, input$KNaO_percent, input$BeO_percent, input$MgO_percent, input$CaO_percent, input$SrO_percent, input$BaO_percent, input$ZnO_percent, input$PbO_percent)
+    list[mod, train, test, rfit, testpred]<- getModel()
+    
+    if (mod == 'KNN Classifier') {
+      y<-knn(train=train[, -1], 
+          test=x, cl=train[, 1], k=input$kVal, prob=TRUE)
+    } else {
+      # A convoluted method to get the column names without manually entering them for the response
+      x1<- head(train, 1)
+      x1[, -1]<- x
+      x1[,1]<- NULL
+      y<- predict(rfit, newdata=x1, type="response")
+    }
+    paste("Your predicted class is: ", y )
+    
+  })
+  
+  #---------------------------------------------------------------------------------------------------------------
+  # --------------------------- Just The Data -----------------------------------------------------------------------
+  #---------------------------------------------------------------------------------------------------------------
+  
+  # Additional function to select all/none of the variables
   observe({
     df<- getData()
     if(input$selectall == 0) return(NULL) 
@@ -160,36 +287,20 @@ shinyServer(function(input, output, session) {
     }
   })
   
+  # Render group input for the list of variables in the table which may be included.
   output$varControl<- renderUI({
     df<- getData()
     checkboxGroupInput("show_vars", "Columns to show:",
                        names(df), selected = names(df))
   })
   
-  output$xcol<- renderUI({
+  # render filtered table for the just the data section
+  output$modTable <- renderDataTable({
     df<- getData()
-    x<- colnames(select_if(df, is.numeric))
-    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id')]
-    selectInput('xcol', 'Select the X Variable', x)
+    datatable(df[, input$show_vars, drop = FALSE], options = list(orderClasses = TRUE))
   })
   
-  output$ycol<- renderUI({
-    df<- getData()
-    x<- colnames(select_if(df, is.numeric))
-    x<- x[!startsWith(x, 'is_') & !startsWith(x, 'rgb') & !endsWith(x, 'id') & x!= input$xcol]
-    selectInput('ycol', 'Select the Y Variable', x)
-  })
-  
-  output$biplt<- renderPlot({
-    df<- getData()
-    df<- na.omit(df)
-    df<- df %>% mutate_if(is.numeric, scale)
-    rownames(df)<- paste(df$id, substr(df$name, 1, 24), sep = '-')
-    df$name<- NULL
-    hierClust <-agnes(df[, c(input$xcol, input$ycol)], method=input$distForm)
-    plot(hierClust, xlab = "", main=paste('Dendogram of', input$xcol, 'and', input$ycol))
-  }, height = 1000, width = 2400)
-  
+  # In the just the data section, filtered data output
   output$longDownload<- downloadHandler('Glazy-filtered.csv', content = function(file) {
     s = input$modTable_rows_all
     df<- getData()
